@@ -78,11 +78,15 @@ def consultar(claves, inicio, fin, token):
         headers={
             "Bmx-Token": token,
             "Accept": "application/json",
-            "User-Agent": "UPQ-IDIA224/1.0",
         },
+        params={"token": token},
         timeout=60,
     )
 
+    if respuesta.status_code == 400:
+        raise ValueError(
+            f"El SIE devolvió 400 en {url} · Detalle: {respuesta.text[:250]}"
+        )
     if respuesta.status_code == 401:
         raise PermissionError("El token no fue aceptado.")
     if respuesta.status_code == 429:
@@ -130,8 +134,8 @@ with st.sidebar:
         "Claves de las series", "SF43718",
         help="Sepáralas con comas. Búscalas en el catálogo del SIE. "
              "SF43718 es el tipo de cambio FIX.")
-    inicio = st.date_input("Desde", date(2021, 1, 1))
-    fin = st.date_input("Hasta", date(2025, 12, 31))
+    inicio = st.date_input("Desde", date(2020, 1, 1))
+    fin = st.date_input("Hasta", date(2024, 12, 31))
     suavizado = st.slider("Días de media móvil", 1, 90, 30)
     st.caption("Fuente: SIE, Banco de México")
 
@@ -146,7 +150,12 @@ if inicio >= fin:
 
 with st.spinner("Consultando el SIE..."):
     try:
-        df, faltantes = consultar(tuple(claves), str(inicio), str(fin), TOKEN)
+        df, faltantes = consultar(
+            tuple(claves),
+            inicio.strftime("%Y-%m-%d"),
+            fin.strftime("%Y-%m-%d"),
+            TOKEN,
+        )
     except PermissionError as e:
         st.error(str(e))
         st.stop()
@@ -236,52 +245,3 @@ with derecha:
            cambio.values,
            color=[ROJO if v > 0 else AZUL_POS for v in cambio.values],
            width=20)
-    ax.axhline(0, color="gray", linewidth=0.8)
-    ax.set_xlabel("Mes")
-    ax.set_ylabel("Cambio respecto al mes anterior (%)")
-    st.pyplot(fig)
-    st.caption("Rojo: el valor subió. Azul: bajó. Para un tipo de cambio, "
-               "subir significa que el peso se debilitó.")
-
-abajo_izq, abajo_der = st.columns(2)
-with abajo_izq:
-    st.subheader("Qué tan movido estuvo cada año")
-    principal["Variacion"] = principal["Valor"].pct_change() * 100
-    porAnio = principal.dropna(subset=["Variacion"])
-
-    fig, ax = plt.subplots(figsize=(6, 3.4))
-    sns.boxplot(data=porAnio, x="Anio", y="Variacion", color=GRIS, ax=ax)
-    ax.axhline(0, color=ROJO, linewidth=1, linestyle="--")
-    ax.set_xlabel("Año")
-    ax.set_ylabel("Variación diaria (%)")
-    st.pyplot(fig)
-
-with abajo_der:
-    st.subheader("Promedio por mes y año")
-    calor = principal.pivot_table(index="Anio", columns="Mes",
-                                  values="Valor", aggfunc="mean")
-
-    fig, ax = plt.subplots(figsize=(6, 3.4))
-    imagen = ax.imshow(calor, cmap="YlGnBu", aspect="auto")
-    fig.colorbar(imagen, ax=ax)
-    ax.set_xticks(range(len(calor.columns)))
-    ax.set_xticklabels(["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul",
-                        "Ago", "Sep", "Oct", "Nov", "Dic"][:len(calor.columns)])
-    ax.set_yticks(range(len(calor.index)))
-    ax.set_yticklabels(calor.index)
-    ax.grid(False)
-    st.pyplot(fig)
-    st.caption("Escala secuencial: el valor tiene orden pero no un cero "
-               "con significado, así que no va divergente.")
-
-
-# ─── Datos ─────────────────────────────────────────────────────────────
-with st.expander("Ver y descargar los datos"):
-    st.write("Días marcados como N/E por serie:", faltantes)
-    st.dataframe(df)
-    st.download_button(
-        "Descargar CSV",
-        df.to_csv(index=False).encode("utf-8"),
-        file_name=f"sie_{'_'.join(claves)}_{inicio}_{fin}.csv",
-        mime="text/csv",
-    )
